@@ -57,7 +57,7 @@ ckan.module('wmtspreview', function (jQuery, _) {
       // Get the layer when changing to a new layer.
       function layerChange(e) {
 	overlay = e.layer;
-	self.map.fitBounds(mapLatLngBounds[url.substring(url.lastIndexOf('LAYER='), url.indexOf('&STYLE')).split('=')[1]]);
+	self.map.fitBounds(mapLatLngBounds[e.layer.options.id]);
       }
 
       // Load crs from epsg.io.
