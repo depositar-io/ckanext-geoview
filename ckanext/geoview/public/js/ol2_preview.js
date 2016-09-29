@@ -6,6 +6,7 @@
 
     this.ckan.module('olpreview', function (jQuery, _) {
 
+        ckan.geoview = ckan.geoview || {}
 
         OpenLayers.Control.CKANLayerSwitcher = OpenLayers.Class(OpenLayers.Control.LayerSwitcher,
             {
@@ -113,7 +114,7 @@
         );
 
 
-        var layerExtractors = {
+        ckan.geoview.layerExtractors = {
 
             'kml': function (resource, proxyUrl, proxyServiceUrl, layerProcessor) {
                 var url = proxyUrl || resource.url;
@@ -137,12 +138,12 @@
             'wms' : function(resource, proxyUrl, proxyServiceUrl, layerProcessor) {
                 var parsedUrl = resource.url.split('#');
                 // use the original URL for the getMap, as there's no need for a proxy for image requests
-                var getMapUrl = parsedUrl[0].split('?')[0]; // remove query if any
+                var getMapUrl = parsedUrl[0];
 
                 var url = proxyServiceUrl || getMapUrl;
 
                 var layerName = parsedUrl.length > 1 && parsedUrl[1];
-                OL_HELPERS.withWMSLayers(url, getMapUrl, layerProcessor, layerName);
+                OL_HELPERS.withWMSLayers(url, getMapUrl, layerProcessor, layerName, true /* useTiling*/ );
             },
             'esrigeojson': function (resource, proxyUrl, proxyServiceUrl, layerProcessor) {
                 var url = proxyUrl || resource.url;
@@ -154,7 +155,7 @@
 
                 var layerName = parsedUrl.length > 1 && parsedUrl[1];
 
-                OL_HELPERS.withArcGisLayers(parsedUrl[0], layerProcessor, layerName);
+                OL_HELPERS.withArcGisLayers(url, layerProcessor, layerName, parsedUrl[0]);
             },
             'gft': function (resource, proxyUrl, proxyServiceUrl, layerProcessor) {
                 var tableId = OL_HELPERS.parseURL(resource.url).query.docid;
@@ -164,7 +165,7 @@
 
         var withLayers = function (resource, proxyUrl, proxyServiceUrl, layerProcessor) {
 
-            var withLayers = layerExtractors[resource.format && resource.format.toLocaleLowerCase()];
+            var withLayers = ckan.geoview.layerExtractors[resource.format && resource.format.toLocaleLowerCase()];
             withLayers && withLayers(resource, proxyUrl, proxyServiceUrl, layerProcessor);
         }
 
@@ -180,6 +181,11 @@
             },
 
             addLayer: function (resourceLayer) {
+
+                if (ckan.geoview && ckan.geoview.feature_style) {
+                    var styleMapJson = JSON.parse(ckan.geoview.feature_style)
+                    resourceLayer.styleMap = new OpenLayers.StyleMap(styleMapJson)
+                }
 
                 if (this.options.ol_config.hide_overlays &&
                     this.options.ol_config.hide_overlays.toLowerCase() == "true") {
@@ -256,22 +262,13 @@
                         attribution: mapConfig.attribution
                     });
                 } else {
-                    // MapQuest OpenStreetMap base map
-                    if (isHttps) {
-                        var urls = ['//otile1-s.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png',
-                                    '//otile2-s.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png',
-                                    '//otile3-s.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png',
-                                    '//otile4-s.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png'];
-
-                    } else {
-                        var urls = ['//otile1.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png',
-                                    '//otile2.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png',
-                                    '//otile3.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png',
-                                    '//otile4.mqcdn.com/tiles/1.0.0/map/${z}/${x}/${y}.png'];
-                    }
-                    var attribution = mapConfig.attribution || 'Map data &copy; OpenStreetMap contributors, Tiles Courtesy of <a href="http://www.mapquest.com/" target="_blank">MapQuest</a> <img src="//developer.mapquest.com/content/osm/mq_logo.png">';
-
-                    baseMapLayer = new OpenLayers.Layer.OSM('MapQuest OSM', urls, {
+                    // Stamen base map
+                    var urls = ['//stamen-tiles-a.a.ssl.fastly.net/terrain/${z}/${x}/${y}.png',
+                                '//stamen-tiles-b.a.ssl.fastly.net/terrain/${z}/${x}/${y}.png',
+                                '//stamen-tiles-c.a.ssl.fastly.net/terrain/${z}/${x}/${y}.png',
+                                '//stamen-tiles-d.a.ssl.fastly.net/terrain/${z}/${x}/${y}.png'];
+                    var attribution = 'Map tiles by <a href="http://stamen.com">Stamen Design</a> (<a href="http://creativecommons.org/licenses/by/3.0">CC BY 3.0</a>). Data by <a href="http://openstreetmap.org">OpenStreetMap</a> (<a href="http://creativecommons.org/licenses/by-sa/3.0">CC BY SA</a>)';
+                    baseMapLayer = new OpenLayers.Layer.OSM('Base Map', urls, {
                       attribution: attribution});
                 }
 
@@ -281,9 +278,18 @@
 
             _onReady: function () {
 
+                // gather options and config for this view
+                var proxyUrl = this.options.proxy_url;
+                var proxyServiceUrl = this.options.proxy_service_url;
+
+                if (this.options.resourceView)
+                    $_.extend(ckan.geoview, JSON.parse(this.options.resourceView))
+
+                ckan.geoview.gapi_key = this.options.gapi_key;
+
                 // Choose base map based on CKAN wide config
                 var baseMapLayer = this._commonBaseLayer(this.options.map_config);
-                var clearBaseLayer = new OpenLayers.Layer.OSM("None", "/img/blank.gif", {isBaseLayer: true, attribution: ''});
+                var clearBaseLayer = new OpenLayers.Layer.OSM("None", this.options.site_url + "img/blank.gif", {isBaseLayer: true, attribution: ''});
 
                 var mapDiv = $("<div></div>").attr("id", "map").addClass("map")
                 var info = $("<div></div>").attr("id", "info")
@@ -299,13 +305,51 @@
                     html: true
                 });
 
+                var eventListeners
+                if ( (ckan.geoview && 'feature_hoveron' in ckan.geoview) ? ckan.geoview['feature_hoveron'] : this.options.ol_config.default_feature_hoveron)
+                    eventListeners = {
+                    featureover: function (e) {
+                        e.feature.renderIntent = "select";
+                        e.feature.layer.drawFeature(e.feature);
+                        var pixel = event.xy
+                        info.css({
+                            left: (pixel.x + 10) + 'px',
+                            top: (pixel.y - 15) + 'px'
+                        });
+                        info.currentFeature = e.feature
+                        info.tooltip('hide')
+                            .empty()
+                        var tooltip = "<div>" + (e.feature.data.name || e.feature.fid) + "</div><table>";
+                        for (var prop in e.feature.data) tooltip += "<tr><td>" + prop + "</td><td>" + e.feature.data[prop] + "</td></tr></div>"
+                        tooltip += "</table>"
+                        info.attr('data-original-title', tooltip)
+                            .tooltip('fixTitle')
+                            .tooltip('show');
+                    },
+                    featureout: function (e) {
+                        e.feature.renderIntent = "default"
+                        e.feature.layer.drawFeature(e.feature)
+                        if (info.currentFeature == e.feature) {
+                            info.tooltip('hide')
+                            info.currentFeature = undefined
+                        }
+
+                    },
+                    featureclick: function (e) {
+                        //log("Map says: " + e.feature.id + " clicked on " + e.feature.layer.name);
+                    }
+                }
+
+                OpenLayers.ImgPath = this.options.site_url + 'js/vendor/openlayers2/img/';
+
                 this.map = new OpenLayers.Map(
                     {
                         div: "map",
-                        theme: "/js/vendor/openlayers2/theme/default/style.css",
+                        theme: this.options.site_url + "js/vendor/openlayers2/theme/default/style.css",
                         layers: [baseMapLayer, clearBaseLayer],
-                        maxExtent: baseMapLayer.getMaxExtent()
-                        //projection: Mercator, // this is needed for WMS layers (most only accept 3857), but causes WFS to fail
+                        maxExtent: baseMapLayer.getMaxExtent(),
+                        eventListeners: eventListeners
+                        //projection: OL_HELPERS.Mercator, // this is needed for WMS layers (most only accept 3857), but causes WFS to fail
                     });
 
                 layerSwitcher = new OpenLayers.Control.CKANLayerSwitcher()
@@ -315,13 +359,12 @@
                 var bboxFrag;
                 var fragMap = OL_HELPERS.parseKVP((window.parent || window).location.hash && (window.parent || window).location.hash.substring(1));
 
-                var bbox = (fragMap.bbox && new OpenLayers.Bounds(fragMap.bbox.split(',')).transform(EPSG4326, this.map.getProjectionObject()));
+                var bbox = (fragMap.bbox && new OpenLayers.Bounds(fragMap.bbox.split(',')).transform(OL_HELPERS.EPSG4326, this.map.getProjectionObject()));
                 if (bbox) this.map.zoomToExtent(bbox);
 
                 var proxyUrl = this.options.proxy_url;
                 var proxyServiceUrl = this.options.proxy_service_url;
 
-                if (!ckan.geoview) ckan.geoview = {};
                 ckan.geoview.googleApiKey = this.options.gapi_key;
 
 
@@ -334,4 +377,3 @@
         }
     });
 })();
-OpenLayers.ImgPath = '/js/vendor/openlayers2/img/';

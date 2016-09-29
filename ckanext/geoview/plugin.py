@@ -5,14 +5,18 @@ import os
 from logging import getLogger
 
 from pylons import config
+from ckan.common import json
 
 from ckan import plugins as p
 import ckan.lib.helpers as h
+
 try:
     from ckan.lib.datapreview import on_same_domain
 except ImportError:
     from ckan.lib.datapreview import _on_same_domain as on_same_domain
 
+ignore_empty = p.toolkit.get_validator('ignore_empty')
+boolean_validator = p.toolkit.get_validator('boolean_validator')
 
 log = getLogger(__name__)
 
@@ -117,7 +121,11 @@ class OLGeoView(GeoViewBase):
                 'icon': 'globe',
                 'iframed': True,
                 'default_title': p.toolkit._('Map viewer'),
-                }
+                'schema': {
+                    'feature_hoveron': [ignore_empty, boolean_validator],
+                    'feature_style': [ignore_empty]
+                },
+               }
 
     def can_view(self, data_dict):
         format_lower = data_dict['resource'].get('format', '').lower()
@@ -128,9 +136,12 @@ class OLGeoView(GeoViewBase):
             format_lower = self._guess_format_from_extension(
                 data_dict['resource']['url'])
 
+        if not format_lower:
+            return False
+
         view_formats = config.get('ckanext.geoview.ol_viewer.formats', '')
         if view_formats:
-            view_formats.split(' ')
+            view_formats = view_formats.split(' ')
         else:
             view_formats = GEOVIEW_FORMATS
 
@@ -141,6 +152,9 @@ class OLGeoView(GeoViewBase):
 
     def view_template(self, context, data_dict):
         return 'dataviewer/openlayers2.html'
+
+    def form_template(self, context, data_dict):
+        return 'dataviewer/openlayers_form.html'
 
     # IResourcePreview (CKAN < 2.3)
 
@@ -154,9 +168,13 @@ class OLGeoView(GeoViewBase):
     # Common for IResourceView and IResourcePreview
 
     def _guess_format_from_extension(self, url):
-        parsed_url = urlparse.urlparse(url)
-        format_lower = (os.path.splitext(parsed_url.path)[1][1:]
-                        .encode('ascii', 'ignore').lower())
+        try:
+            parsed_url = urlparse.urlparse(url)
+            format_lower = (os.path.splitext(parsed_url.path)[1][1:]
+                            .encode('ascii', 'ignore').lower())
+        except ValueError, e:
+            log.error('Invalid URL: {0}, {1}'.format(url, e))
+            format_lower = ''
 
         return format_lower
 
@@ -169,20 +187,21 @@ class OLGeoView(GeoViewBase):
             data_dict['resource']['format'] = \
                 self._guess_format_from_extension(data_dict['resource']['url'])
 
-        proxy_service_url = None
-
         if self.proxy_enabled and not same_domain:
             proxy_url = proxy.get_proxified_resource_url(data_dict)
             proxy_service_url = get_proxified_service_url(data_dict)
         else:
             proxy_url = data_dict['resource']['url']
+            proxy_service_url = data_dict['resource']['url']
+
         gapi_key = config.get('ckanext.geoview.gapi_key')
         if not p.toolkit.check_ckan_version(min_version='2.3'):
             p.toolkit.c.resource['proxy_url'] = proxy_url
             p.toolkit.c.resource['proxy_service_url'] = proxy_service_url
             p.toolkit.c.resource['gapi_key'] = gapi_key
 
-        return {'proxy_service_url': proxy_service_url,
+        return {'resource_view_json': 'resource_view' in data_dict and json.dumps(data_dict['resource_view']),
+                'proxy_service_url': proxy_service_url,
                 'proxy_url': proxy_url,
                 'gapi_key': gapi_key}
 
@@ -282,7 +301,7 @@ class WMTSView(GeoViewBase):
 
     def can_view(self, data_dict):
         resource = data_dict['resource']
-        format_lower = resource['format'].lower()
+        format_lower = resource.get('format', '').lower()
 
         if format_lower in self.WMTS:
             return self.same_domain or self.proxy_enabled
