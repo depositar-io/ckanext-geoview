@@ -196,7 +196,7 @@ The projection information (EPSG code, e.g., 4326 and 3857) will be loaded if th
 
     ckanext.geoview.shp_viewer.srid = 4326
 
-The encoding of the shapefile can be defined by a custom field named 'encoding' in the metadata of the dataset or the following configuration option (The loading order is: 'encoding' field, option and UTF-8)::
+The encoding of the shapefile can be defined by a custom resource field named 'encoding' in the metadata of the dataset or the following configuration option (The loading order is: 'encoding' field, option and UTF-8)::
 
     ckanext.geoview.shp_viewer.encoding = UTF-8
 

@@ -74,8 +74,8 @@ ckan.module('shppreview', function (jQuery, _) {
         }
       }).addTo(self.map);
 
-      if (preload_package.encoding)
-        encoding = preload_package.encoding;
+      if (preload_resource.encoding)
+        encoding = preload_resource.encoding;
       else if (this.options.shp_config.encoding)
         encoding = this.options.shp_config.encoding;
       else

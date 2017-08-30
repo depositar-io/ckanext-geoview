@@ -17,7 +17,6 @@
     {% block scripts %}
       <script>
         var preload_resource = {{ h.literal(h.dump_json(resource or c.resource)) }};
-        var preload_package = {{ h.literal(h.dump_json(package or c.package)) }};
       </script>
     {% endblock %}
 
